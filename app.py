@@ -1,12 +1,8 @@
 import streamlit as st
 import os
-import base64
-import json
 import time
 from google import genai
 from google.genai import types
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
 
 # Set page configuration
 st.set_page_config(
@@ -18,9 +14,6 @@ st.set_page_config(
 
 # Constants and configurations
 GEMINI_API_KEY = "AIzaSyBFjG6kQWfrpg0Q7tcvxxQHNDl3DVW8-gA"
-HF_TOKEN = "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"
-GEMINI_MODEL = "gemini-2.0-flash"
-HF_MODEL = "google/gemma-3-1b-it"
 
 # Initialize session state
 if 'messages' not in st.session_state:
@@ -36,18 +29,6 @@ if 'business_data' not in st.session_state:
         "budget_range": "",
         "current_challenges": ""
     }
-
-# Initialize AI models
-@st.cache_resource
-def load_hf_model():
-    tokenizer = AutoTokenizer.from_pretrained(HF_MODEL, token=HF_TOKEN)
-    model = AutoModelForCausalLM.from_pretrained(
-        HF_MODEL, 
-        token=HF_TOKEN,
-        torch_dtype=torch.float16,
-        device_map="auto"
-    )
-    return model, tokenizer
 
 def generate_with_gemini(prompt, image_data=None):
     """Generate content using Gemini model"""
@@ -80,7 +61,7 @@ def generate_with_gemini(prompt, image_data=None):
         
         # Generate content
         response = client.models.generate_content(
-            model=GEMINI_MODEL,
+            model="gemini-2.0-flash",
             contents=contents,
             config=generate_content_config,
         )
@@ -88,27 +69,6 @@ def generate_with_gemini(prompt, image_data=None):
         return response.text
     except Exception as e:
         st.error(f"Error generating with Gemini: {e}")
-        return f"An error occurred: {str(e)}"
-
-def generate_with_hf(prompt):
-    """Generate content using Hugging Face model for text-only tasks"""
-    try:
-        model, tokenizer = load_hf_model()
-        
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-        with torch.no_grad():
-            output_tokens = model.generate(
-                **inputs,
-                max_new_tokens=1024,
-                temperature=0.7,
-                top_p=0.9,
-                do_sample=True
-            )
-        
-        response = tokenizer.decode(output_tokens[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-        return response
-    except Exception as e:
-        st.error(f"Error generating with Hugging Face model: {e}")
         return f"An error occurred: {str(e)}"
 
 # UI Components
@@ -222,7 +182,7 @@ def business_profile_page():
                 Provide 3-5 initial marketing strategy recommendations based on this data.
                 """
                 with st.spinner("Analyzing your business profile..."):
-                    analysis = generate_with_hf(analysis_prompt)
+                    analysis = generate_with_gemini(analysis_prompt)
                     st.session_state.profile_analysis = analysis
             
             st.subheader("Initial Analysis")
@@ -285,7 +245,7 @@ def strategy_generator_page():
             """
             
             with st.spinner("Generating your marketing strategy..."):
-                strategy = generate_with_hf(strategy_prompt)
+                strategy = generate_with_gemini(strategy_prompt)
                 st.session_state.marketing_strategy = strategy
             
             st.subheader("Your Marketing Strategy")
@@ -364,7 +324,7 @@ def campaign_planning_page():
             """
             
             with st.spinner("Generating your campaign plan..."):
-                campaign_plan = generate_with_hf(campaign_prompt)
+                campaign_plan = generate_with_gemini(campaign_prompt)
             
             st.subheader("Your Campaign Plan")
             st.write(campaign_plan)
@@ -382,51 +342,7 @@ def campaign_planning_page():
 def analytics_page():
     st.header("📊 Marketing Analytics Assistant")
     
-    st.subheader("Marketing Performance Analysis")
-    
-    analysis_type = st.selectbox(
-        "What would you like to analyze?",
-        options=[
-            "Campaign Performance", "Content Performance", 
-            "Social Media Metrics", "SEO Performance", 
-            "Email Marketing Metrics", "Ad Performance"
-        ]
-    )
-    
-    st.write("Upload your marketing data for analysis (CSV format)")
-    uploaded_file = st.file_uploader("Choose a CSV file...", type=["csv"])
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        time_period = st.selectbox(
-            "Time Period",
-            options=["Last 7 days", "Last 30 days", "Last 90 days", "Last 6 months", "Last year", "Custom"]
-        )
-    with col2:
-        if time_period == "Custom":
-            date_range = st.date_input("Select date range", [])
-    
-    specific_questions = st.text_area("Specific questions you'd like answered about your data", height=100)
-    
-    if st.button("Analyze Data"):
-        if uploaded_file:
-            st.info("Data analysis feature would process the uploaded CSV here.")
-            st.write("Example analysis results:")
-            
-            # Mock data visualization
-            st.subheader("Key Metrics Overview")
-            metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
-            metrics_col1.metric("Conversion Rate", "3.2%", "+0.5%")
-            metrics_col2.metric("Avg. CPC", "$1.25", "-$0.15")
-            metrics_col3.metric("CTR", "2.8%", "+0.3%")
-            metrics_col4.metric("ROI", "245%", "+22%")
-            
-            st.write("For a full analysis of your marketing data, please upload actual data files.")
-        else:
-            st.warning("Please upload a CSV file containing your marketing data.")
-    
     # AI Marketing Assistant
-    st.markdown("---")
     st.subheader("Marketing AI Assistant")
     st.write("Ask any marketing-related questions or get recommendations.")
     
@@ -453,7 +369,7 @@ def analytics_page():
             """
             
             with st.spinner("Generating insights..."):
-                insights = generate_with_hf(prompt)
+                insights = generate_with_gemini(prompt)
             
             st.write("### Marketing Insights")
             st.write(insights)
