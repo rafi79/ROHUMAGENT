@@ -6,6 +6,7 @@ import base64
 import os
 from gtts import gTTS
 from io import BytesIO
+import tempfile
 
 # Set page configuration
 st.set_page_config(
@@ -35,23 +36,47 @@ if 'tts_active' not in st.session_state:
     st.session_state.tts_active = False
 if 'current_tts_text' not in st.session_state:
     st.session_state.current_tts_text = ""
+if 'uploaded_files' not in st.session_state:
+    st.session_state.uploaded_files = {
+        'images': [],
+        'videos': [],
+        'audio': []
+    }
+if 'voice_gender' not in st.session_state:
+    st.session_state.voice_gender = "Female"
+if 'voice_speed' not in st.session_state:
+    st.session_state.voice_speed = "Normal"
 
-def text_to_speech(text):
+# TTS function with improved male voice support
+def text_to_speech(text, gender="Female", speed="Normal"):
     """Convert text to speech and create an audio player"""
     if not text:
         return None
     
     try:
-        # Create a text-to-speech object
-        tts = gTTS(text=text, lang='en', slow=False)
+        # Configure TTS based on speed
+        slow_option = False
+        if speed == "Slow":
+            slow_option = True
         
-        # Save the audio to a BytesIO object
-        audio_bytes = BytesIO()
-        tts.write_to_fp(audio_bytes)
-        audio_bytes.seek(0)
+        # Use different language codes for male/female approximation
+        # This is a workaround since gTTS doesn't directly support gender selection
+        lang_code = "en-us"  # Default female voice
+        if gender == "Male":
+            lang_code = "en-gb"  # British English tends to have a deeper voice
+        
+        # Create the TTS object
+        tts = gTTS(text=text, lang=lang_code, slow=slow_option)
+        
+        # Save to a temporary file (better audio quality than BytesIO for some browsers)
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as fp:
+            tts.save(fp.name)
+            with open(fp.name, 'rb') as audio_file:
+                audio_bytes = audio_file.read()
+            os.unlink(fp.name)  # Remove the temp file
         
         # Convert to base64 for the audio player
-        audio_base64 = base64.b64encode(audio_bytes.read()).decode()
+        audio_base64 = base64.b64encode(audio_bytes).decode()
         audio_player = f'<audio autoplay controls><source src="data:audio/mp3;base64,{audio_base64}"></audio>'
         
         return audio_player
@@ -59,7 +84,7 @@ def text_to_speech(text):
         st.error(f"TTS Error: {str(e)}")
         return None
 
-def generate_with_gemini(prompt):
+def generate_with_gemini(prompt, image_data=None):
     """Generate content using Gemini model via REST API"""
     try:
         headers = {
@@ -67,6 +92,7 @@ def generate_with_gemini(prompt):
             "x-goog-api-key": GEMINI_API_KEY
         }
         
+        # Prepare the data structure for the API call
         data = {
             "contents": [
                 {
@@ -81,6 +107,11 @@ def generate_with_gemini(prompt):
                 "maxOutputTokens": 4096
             }
         }
+        
+        # Add image if provided (for future multimodal implementation)
+        if image_data:
+            # This would need to be implemented with proper multimodal API support
+            pass
         
         response = requests.post(
             GEMINI_API_URL,
@@ -99,6 +130,29 @@ def generate_with_gemini(prompt):
         st.error(f"Error: {str(e)}")
         return f"An error occurred: {str(e)}"
 
+def save_uploaded_file(uploaded_file, file_type):
+    """Save uploaded file and return the file path"""
+    file_details = {"FileName": uploaded_file.name, "FileType": uploaded_file.type, "FileSize": uploaded_file.size}
+    
+    # Add to session state
+    if file_type == "image":
+        st.session_state.uploaded_files['images'].append(file_details)
+    elif file_type == "video":
+        st.session_state.uploaded_files['videos'].append(file_details)
+    elif file_type == "audio":
+        st.session_state.uploaded_files['audio'].append(file_details)
+    
+    return file_details
+
+def display_file_preview(file, file_type):
+    """Display a preview of the uploaded file"""
+    if file_type == "image":
+        st.image(file, caption=file.name, use_column_width=True)
+    elif file_type == "video":
+        st.video(file)
+    elif file_type == "audio":
+        st.audio(file)
+
 # UI Components
 def sidebar():
     with st.sidebar:
@@ -111,33 +165,71 @@ def sidebar():
         st.subheader("🔊 Text-to-Speech")
         st.session_state.tts_active = st.toggle("Enable AI Voice", value=st.session_state.tts_active)
         
-        voice_speed = st.select_slider(
+        st.session_state.voice_speed = st.select_slider(
             "Voice Speed",
             options=["Slow", "Normal", "Fast"],
-            value="Normal",
+            value=st.session_state.voice_speed,
             disabled=not st.session_state.tts_active
         )
         
-        voice_gender = st.radio(
+        st.session_state.voice_gender = st.radio(
             "Voice Type",
             options=["Female", "Male"],
-            index=0,
+            index=0 if st.session_state.voice_gender == "Female" else 1,
             disabled=not st.session_state.tts_active
         )
         
         if st.session_state.tts_active and st.button("Speak Current Analysis"):
             if st.session_state.current_tts_text:
-                audio_player = text_to_speech(st.session_state.current_tts_text)
-                if audio_player:
-                    st.markdown(audio_player, unsafe_allow_html=True)
+                # Create a short summary for TTS to avoid long audio
+                summary_prompt = f"""
+                Create a 3-4 sentence summary of the key points from this content. Focus only on the most important takeaways:
+                
+                {st.session_state.current_tts_text[:1000]}...
+                """
+                with st.spinner("Generating audio summary..."):
+                    summary = generate_with_gemini(summary_prompt)
+                    audio_player = text_to_speech(
+                        summary, 
+                        gender=st.session_state.voice_gender, 
+                        speed=st.session_state.voice_speed
+                    )
+                    if audio_player:
+                        st.markdown(audio_player, unsafe_allow_html=True)
             else:
                 st.warning("No analysis available to speak yet.")
         
         st.markdown("---")
         
+        # File Upload Section
+        st.subheader("📁 Media Upload")
+        
+        # Image Upload
+        uploaded_image = st.file_uploader("Upload Images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+        if uploaded_image:
+            for img in uploaded_image:
+                save_uploaded_file(img, "image")
+                st.success(f"Uploaded image: {img.name}")
+                
+        # Video Upload
+        uploaded_video = st.file_uploader("Upload Videos", type=["mp4", "mov", "avi"], accept_multiple_files=True)
+        if uploaded_video:
+            for vid in uploaded_video:
+                save_uploaded_file(vid, "video")
+                st.success(f"Uploaded video: {vid.name}")
+                
+        # Audio Upload
+        uploaded_audio = st.file_uploader("Upload Audio", type=["mp3", "wav", "ogg"], accept_multiple_files=True)
+        if uploaded_audio:
+            for aud in uploaded_audio:
+                save_uploaded_file(aud, "audio")
+                st.success(f"Uploaded audio: {aud.name}")
+                
+        st.markdown("---")
+        
         # Navigation
         st.subheader("Navigation")
-        page = st.radio("Go to:", ["Business Profile", "Strategy Generator", "Campaign Planning"])
+        page = st.radio("Go to:", ["Business Profile", "Strategy Generator", "Campaign Planning", "Media Gallery"])
         
         st.markdown("---")
         
@@ -152,6 +244,31 @@ def sidebar():
 def business_profile_page():
     st.header("🏢 Business Profile")
     st.write("Let's gather some information about your business to create tailored marketing strategies.")
+    
+    # Media upload section specifically for business profile
+    st.subheader("Upload Business Media")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        logo = st.file_uploader("Company Logo", type=["jpg", "jpeg", "png"])
+        if logo:
+            st.image(logo, width=200)
+            save_uploaded_file(logo, "image")
+    
+    with col2:
+        product_images = st.file_uploader("Product Images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+        if product_images:
+            for img in product_images:
+                save_uploaded_file(img, "image")
+                st.image(img, width=150, caption=img.name)
+    
+    with col3:
+        promo_video = st.file_uploader("Promotional Video", type=["mp4", "mov"])
+        if promo_video:
+            st.video(promo_video)
+            save_uploaded_file(promo_video, "video")
+    
+    st.markdown("---")
     
     col1, col2 = st.columns(2)
     
@@ -204,6 +321,15 @@ def business_profile_page():
         if st.session_state.business_data["business_name"] and st.session_state.business_data["industry"]:
             st.success("Business profile saved successfully!")
             
+            # Mention uploaded media in the prompt
+            uploaded_media_text = ""
+            if st.session_state.uploaded_files['images']:
+                uploaded_media_text += f"They have uploaded {len(st.session_state.uploaded_files['images'])} images. "
+            if st.session_state.uploaded_files['videos']:
+                uploaded_media_text += f"They have uploaded {len(st.session_state.uploaded_files['videos'])} videos. "
+            if st.session_state.uploaded_files['audio']:
+                uploaded_media_text += f"They have uploaded {len(st.session_state.uploaded_files['audio'])} audio files. "
+            
             analysis_prompt = f"""
             Analyze this business profile for marketing strategy opportunities:
             Business Name: {st.session_state.business_data['business_name']}
@@ -212,6 +338,8 @@ def business_profile_page():
             Marketing Goals: {st.session_state.business_data['marketing_goals']}
             Budget Range: {st.session_state.business_data['budget_range']}
             Challenges: {st.session_state.business_data['current_challenges']}
+            
+            {uploaded_media_text}
             
             Provide a concise summary and 3-5 initial marketing strategy recommendations based on this data.
             """
@@ -228,13 +356,17 @@ def business_profile_page():
             if st.session_state.tts_active:
                 # Create a short summary for TTS to avoid long audio
                 summary_prompt = f"""
-                Create a 2-3 sentence summary of the following marketing analysis. Keep it very brief but informative:
+                Create a 3-4 sentence summary of the following marketing analysis. Keep it very brief but informative:
                 
                 {analysis}
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    audio_player = text_to_speech(summary)
+                    audio_player = text_to_speech(
+                        summary, 
+                        gender=st.session_state.voice_gender, 
+                        speed=st.session_state.voice_speed
+                    )
                     if audio_player:
                         st.markdown(audio_player, unsafe_allow_html=True)
         else:
@@ -248,6 +380,28 @@ def strategy_generator_page():
         return
     
     st.write(f"Generating marketing strategies for **{st.session_state.business_data['business_name']}**")
+    
+    # Media upload specifically for strategy
+    st.subheader("Upload Strategy-Related Media")
+    strategy_media = st.file_uploader(
+        "Upload relevant market research, competitor analyses, etc.", 
+        type=["jpg", "jpeg", "png", "pdf", "mp4", "mp3"], 
+        accept_multiple_files=True
+    )
+    
+    if strategy_media:
+        for media in strategy_media:
+            if media.type.startswith('image'):
+                save_uploaded_file(media, "image")
+                st.image(media, width=150, caption=media.name)
+            elif media.type.startswith('video'):
+                save_uploaded_file(media, "video")
+                st.video(media)
+            elif media.type.startswith('audio'):
+                save_uploaded_file(media, "audio")
+                st.audio(media)
+    
+    st.markdown("---")
     
     st.subheader("Strategy Focus")
     focus_areas = st.multiselect(
@@ -268,6 +422,15 @@ def strategy_generator_page():
     
     if st.button("Generate Marketing Strategy"):
         if focus_areas:
+            # Mention uploaded media in the prompt
+            uploaded_media_text = ""
+            if st.session_state.uploaded_files['images']:
+                uploaded_media_text += f"They have uploaded {len(st.session_state.uploaded_files['images'])} images. "
+            if st.session_state.uploaded_files['videos']:
+                uploaded_media_text += f"They have uploaded {len(st.session_state.uploaded_files['videos'])} videos. "
+            if st.session_state.uploaded_files['audio']:
+                uploaded_media_text += f"They have uploaded {len(st.session_state.uploaded_files['audio'])} audio files. "
+                
             strategy_prompt = f"""
             Create a comprehensive marketing strategy for:
             Business: {st.session_state.business_data['business_name']}
@@ -280,6 +443,8 @@ def strategy_generator_page():
             Focus on these marketing areas: {', '.join(focus_areas)}
             Timeframe: {timeframe}
             Competitors: {competitors}
+            
+            {uploaded_media_text}
             
             Please structure the strategy with these sections:
             1. Executive Summary
@@ -320,7 +485,11 @@ def strategy_generator_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    audio_player = text_to_speech(summary)
+                    audio_player = text_to_speech(
+                        summary, 
+                        gender=st.session_state.voice_gender, 
+                        speed=st.session_state.voice_speed
+                    )
                     if audio_player:
                         st.markdown(audio_player, unsafe_allow_html=True)
         else:
@@ -334,6 +503,28 @@ def campaign_planning_page():
         return
     
     st.subheader("Create a Marketing Campaign")
+    
+    # Media upload specifically for campaign
+    st.subheader("Upload Campaign-Related Media")
+    campaign_media = st.file_uploader(
+        "Upload creative assets, brand guidelines, etc.", 
+        type=["jpg", "jpeg", "png", "pdf", "mp4", "mp3"], 
+        accept_multiple_files=True
+    )
+    
+    if campaign_media:
+        for media in campaign_media:
+            if media.type.startswith('image'):
+                save_uploaded_file(media, "image")
+                st.image(media, width=150, caption=media.name)
+            elif media.type.startswith('video'):
+                save_uploaded_file(media, "video")
+                st.video(media)
+            elif media.type.startswith('audio'):
+                save_uploaded_file(media, "audio")
+                st.audio(media)
+    
+    st.markdown("---")
     
     campaign_name = st.text_input("Campaign Name")
     campaign_goal = st.selectbox(
@@ -364,6 +555,15 @@ def campaign_planning_page():
     
     if st.button("Generate Campaign Plan"):
         if campaign_name and campaign_goal and campaign_description:
+            # Mention uploaded media in the prompt
+            uploaded_media_text = ""
+            if st.session_state.uploaded_files['images']:
+                uploaded_media_text += f"They have uploaded {len(st.session_state.uploaded_files['images'])} images. "
+            if st.session_state.uploaded_files['videos']:
+                uploaded_media_text += f"They have uploaded {len(st.session_state.uploaded_files['videos'])} videos. "
+            if st.session_state.uploaded_files['audio']:
+                uploaded_media_text += f"They have uploaded {len(st.session_state.uploaded_files['audio'])} audio files. "
+                
             campaign_prompt = f"""
             Create a detailed marketing campaign plan for:
             Business: {st.session_state.business_data['business_name']}
@@ -373,6 +573,8 @@ def campaign_planning_page():
             Budget: ${campaign_budget}
             Primary Channel: {primary_channel}
             Description: {campaign_description}
+            
+            {uploaded_media_text}
             
             This campaign should align with the overall marketing strategy for the business.
             
@@ -413,11 +615,87 @@ def campaign_planning_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    audio_player = text_to_speech(summary)
+                    audio_player = text_to_speech(
+                        summary, 
+                        gender=st.session_state.voice_gender, 
+                        speed=st.session_state.voice_speed
+                    )
                     if audio_player:
                         st.markdown(audio_player, unsafe_allow_html=True)
         else:
             st.error("Please fill in all required fields.")
+
+def media_gallery_page():
+    st.header("🖼️ Media Gallery")
+    st.write("View and manage your uploaded media files")
+    
+    # Filter tabs
+    tab1, tab2, tab3 = st.tabs(["Images", "Videos", "Audio"])
+    
+    with tab1:
+        st.subheader("Uploaded Images")
+        if st.session_state.uploaded_files['images']:
+            # Create a grid layout for images
+            cols = st.columns(3)
+            for i, img_info in enumerate(st.session_state.uploaded_files['images']):
+                col_idx = i % 3
+                with cols[col_idx]:
+                    st.write(f"**{img_info['FileName']}**")
+                    st.write(f"Type: {img_info['FileType']}")
+                    st.write(f"Size: {img_info['FileSize']/1024:.1f} KB")
+        else:
+            st.info("No images uploaded yet")
+    
+    with tab2:
+        st.subheader("Uploaded Videos")
+        if st.session_state.uploaded_files['videos']:
+            for video_info in st.session_state.uploaded_files['videos']:
+                st.write(f"**{video_info['FileName']}**")
+                st.write(f"Type: {video_info['FileType']}")
+                st.write(f"Size: {video_info['FileSize']/1024/1024:.1f} MB")
+                st.markdown("---")
+        else:
+            st.info("No videos uploaded yet")
+    
+    with tab3:
+        st.subheader("Uploaded Audio")
+        if st.session_state.uploaded_files['audio']:
+            for audio_info in st.session_state.uploaded_files['audio']:
+                st.write(f"**{audio_info['FileName']}**")
+                st.write(f"Type: {audio_info['FileType']}")
+                st.write(f"Size: {audio_info['FileSize']/1024/1024:.1f} MB")
+                st.markdown("---")
+        else:
+            st.info("No audio files uploaded yet")
+    
+    # Upload new media
+    st.subheader("Upload New Media")
+    
+    upload_type = st.radio("Select media type", ["Image", "Video", "Audio"])
+    
+    if upload_type == "Image":
+        new_images = st.file_uploader("Upload new images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+        if new_images:
+            for img in new_images:
+                save_uploaded_file(img, "image")
+                st.success(f"Uploaded image: {img.name}")
+                st.image(img, width=200)
+    
+    elif upload_type == "Video":
+        new_videos = st.file_uploader("Upload new videos", type=["mp4", "mov", "avi"], accept_multiple_files=True)
+        if new_videos:
+            for vid in new_videos:
+                save_uploaded_file(vid, "video")
+                st.success(f"Uploaded video: {vid.name}")
+                st.video(vid)
+    
+    elif upload_type == "Audio":
+        new_audio = st.file_uploader("Upload new audio", type=["mp3", "wav", "ogg"], accept_multiple_files=True)
+        if new_audio:
+            for aud in new_audio:
+                save_uploaded_file(aud, "audio")
+                st.success(f"Uploaded audio: {aud.name}")
+                st.audio(aud)
 
 # Main application
 def main():
@@ -429,6 +707,8 @@ def main():
         strategy_generator_page()
     elif page == "Campaign Planning":
         campaign_planning_page()
+    elif page == "Media Gallery":
+        media_gallery_page()
 
 if __name__ == "__main__":
     main()
