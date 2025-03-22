@@ -2,6 +2,10 @@ import streamlit as st
 import requests
 import json
 import time
+import base64
+import os
+from gtts import gTTS
+from io import BytesIO
 
 # Set page configuration
 st.set_page_config(
@@ -27,6 +31,33 @@ if 'business_data' not in st.session_state:
     }
 if 'marketing_strategy' not in st.session_state:
     st.session_state.marketing_strategy = None
+if 'tts_active' not in st.session_state:
+    st.session_state.tts_active = False
+if 'current_tts_text' not in st.session_state:
+    st.session_state.current_tts_text = ""
+
+def text_to_speech(text):
+    """Convert text to speech and create an audio player"""
+    if not text:
+        return None
+    
+    try:
+        # Create a text-to-speech object
+        tts = gTTS(text=text, lang='en', slow=False)
+        
+        # Save the audio to a BytesIO object
+        audio_bytes = BytesIO()
+        tts.write_to_fp(audio_bytes)
+        audio_bytes.seek(0)
+        
+        # Convert to base64 for the audio player
+        audio_base64 = base64.b64encode(audio_bytes.read()).decode()
+        audio_player = f'<audio autoplay controls><source src="data:audio/mp3;base64,{audio_base64}"></audio>'
+        
+        return audio_player
+    except Exception as e:
+        st.error(f"TTS Error: {str(e)}")
+        return None
 
 def generate_with_gemini(prompt):
     """Generate content using Gemini model via REST API"""
@@ -73,6 +104,34 @@ def sidebar():
     with st.sidebar:
         st.title("🚀 ROH-Ads")
         st.subheader("AI Marketing Strategy Assistant")
+        
+        st.markdown("---")
+        
+        # TTS Controls
+        st.subheader("🔊 Text-to-Speech")
+        st.session_state.tts_active = st.toggle("Enable AI Voice", value=st.session_state.tts_active)
+        
+        voice_speed = st.select_slider(
+            "Voice Speed",
+            options=["Slow", "Normal", "Fast"],
+            value="Normal",
+            disabled=not st.session_state.tts_active
+        )
+        
+        voice_gender = st.radio(
+            "Voice Type",
+            options=["Female", "Male"],
+            index=0,
+            disabled=not st.session_state.tts_active
+        )
+        
+        if st.session_state.tts_active and st.button("Speak Current Analysis"):
+            if st.session_state.current_tts_text:
+                audio_player = text_to_speech(st.session_state.current_tts_text)
+                if audio_player:
+                    st.markdown(audio_player, unsafe_allow_html=True)
+            else:
+                st.warning("No analysis available to speak yet.")
         
         st.markdown("---")
         
@@ -154,15 +213,30 @@ def business_profile_page():
             Budget Range: {st.session_state.business_data['budget_range']}
             Challenges: {st.session_state.business_data['current_challenges']}
             
-            Provide 3-5 initial marketing strategy recommendations based on this data.
+            Provide a concise summary and 3-5 initial marketing strategy recommendations based on this data.
             """
             
             with st.spinner("Analyzing your business profile..."):
                 analysis = generate_with_gemini(analysis_prompt)
                 st.session_state.profile_analysis = analysis
+                st.session_state.current_tts_text = analysis
             
             st.subheader("Initial Analysis")
             st.write(st.session_state.profile_analysis)
+            
+            # Auto-play TTS if enabled
+            if st.session_state.tts_active:
+                # Create a short summary for TTS to avoid long audio
+                summary_prompt = f"""
+                Create a 2-3 sentence summary of the following marketing analysis. Keep it very brief but informative:
+                
+                {analysis}
+                """
+                with st.spinner("Generating audio summary..."):
+                    summary = generate_with_gemini(summary_prompt)
+                    audio_player = text_to_speech(summary)
+                    if audio_player:
+                        st.markdown(audio_player, unsafe_allow_html=True)
         else:
             st.error("Please fill in at least the Business Name and Industry fields.")
 
@@ -223,6 +297,7 @@ def strategy_generator_page():
             with st.spinner("Generating your marketing strategy..."):
                 strategy = generate_with_gemini(strategy_prompt)
                 st.session_state.marketing_strategy = strategy
+                st.session_state.current_tts_text = strategy
             
             st.subheader("Your Marketing Strategy")
             st.write(st.session_state.marketing_strategy)
@@ -234,6 +309,20 @@ def strategy_generator_page():
                 file_name=f"{st.session_state.business_data['business_name']}_marketing_strategy.txt",
                 mime="text/plain"
             )
+            
+            # Auto-play TTS if enabled
+            if st.session_state.tts_active:
+                # Create a short summary for TTS to avoid long audio
+                summary_prompt = f"""
+                Create a 3-4 sentence summary of the key points from this marketing strategy. Focus only on the most important takeaways:
+                
+                {strategy[:1000]}...
+                """
+                with st.spinner("Generating audio summary..."):
+                    summary = generate_with_gemini(summary_prompt)
+                    audio_player = text_to_speech(summary)
+                    if audio_player:
+                        st.markdown(audio_player, unsafe_allow_html=True)
         else:
             st.error("Please select at least one marketing focus area.")
 
@@ -301,6 +390,7 @@ def campaign_planning_page():
             
             with st.spinner("Generating your campaign plan..."):
                 campaign_plan = generate_with_gemini(campaign_prompt)
+                st.session_state.current_tts_text = campaign_plan
             
             st.subheader("Your Campaign Plan")
             st.write(campaign_plan)
@@ -312,6 +402,20 @@ def campaign_planning_page():
                 file_name=f"{campaign_name}_campaign_plan.txt",
                 mime="text/plain"
             )
+            
+            # Auto-play TTS if enabled
+            if st.session_state.tts_active:
+                # Create a short summary for TTS to avoid long audio
+                summary_prompt = f"""
+                Create a brief 3-4 sentence summary of this marketing campaign plan for {campaign_name}. Focus on the key actions and expected outcomes:
+                
+                {campaign_plan[:1000]}...
+                """
+                with st.spinner("Generating audio summary..."):
+                    summary = generate_with_gemini(summary_prompt)
+                    audio_player = text_to_speech(summary)
+                    if audio_player:
+                        st.markdown(audio_player, unsafe_allow_html=True)
         else:
             st.error("Please fill in all required fields.")
 
