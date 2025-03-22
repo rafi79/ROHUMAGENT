@@ -2,8 +2,9 @@ import streamlit as st
 import requests
 import json
 import base64
-import time
+import os
 from io import BytesIO
+import tempfile
 
 # Set page configuration
 st.set_page_config(
@@ -39,25 +40,30 @@ if 'uploaded_files' not in st.session_state:
         'videos': [],
         'audio': []
     }
+if 'voice_gender' not in st.session_state:
+    st.session_state.voice_gender = "Female"
 
-# Cloud TTS function using an API endpoint
+# Simplified TTS function - uses a visual placeholder instead of actual speech
 def text_to_speech_placeholder(text, gender="Female"):
-    """
-    This is a placeholder for a TTS function.
-    In a real implementation, you would use a service like Google Cloud TTS API,
-    Amazon Polly, or another cloud TTS service.
-    """
-    st.info(f"TTS feature would speak: '{text[:100]}...' in a {gender} voice")
+    """Show a visual placeholder for TTS functionality"""
+    if not text:
+        return None
     
-    # Create a simple audio notification instead
+    # Create a notification sound (very short beep)
     audio_html = """
     <audio autoplay>
         <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=" type="audio/wav">
     </audio>
     """
-    st.markdown(audio_html, unsafe_allow_html=True)
     
-    return True
+    # Display the text that would be spoken
+    tts_container = st.empty()
+    with tts_container.container():
+        st.markdown(f"### 🔊 AI Voice ({gender})")
+        st.info(f'"{text}"')
+        st.markdown(audio_html, unsafe_allow_html=True)
+    
+    return tts_container
 
 def generate_with_gemini(prompt, image_data=None):
     """Generate content using Gemini model via REST API"""
@@ -119,15 +125,6 @@ def save_uploaded_file(uploaded_file, file_type):
     
     return file_details
 
-def display_file_preview(file, file_type):
-    """Display a preview of the uploaded file"""
-    if file_type == "image":
-        st.image(file, caption=file.name, use_column_width=True)
-    elif file_type == "video":
-        st.video(file)
-    elif file_type == "audio":
-        st.audio(file)
-
 # UI Components
 def sidebar():
     with st.sidebar:
@@ -140,16 +137,16 @@ def sidebar():
         st.subheader("🔊 Text-to-Speech")
         st.session_state.tts_active = st.toggle("Enable AI Voice", value=st.session_state.tts_active)
         
-        voice_gender = st.radio(
+        st.session_state.voice_gender = st.radio(
             "Voice Type",
             options=["Female", "Male"],
-            index=0,
+            index=0 if st.session_state.voice_gender == "Female" else 1,
             disabled=not st.session_state.tts_active
         )
         
         if st.session_state.tts_active and st.button("Speak Current Analysis"):
             if st.session_state.current_tts_text:
-                # Create a short summary for TTS to avoid long audio
+                # Create a short summary for TTS
                 summary_prompt = f"""
                 Create a 3-4 sentence summary of the key points from this content. Focus only on the most important takeaways:
                 
@@ -157,7 +154,7 @@ def sidebar():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    text_to_speech_placeholder(summary, gender=voice_gender)
+                    text_to_speech_placeholder(summary, gender=st.session_state.voice_gender)
             else:
                 st.warning("No analysis available to speak yet.")
         
@@ -192,14 +189,6 @@ def sidebar():
         # Navigation
         st.subheader("Navigation")
         page = st.radio("Go to:", ["Business Profile", "Strategy Generator", "Campaign Planning", "Media Gallery"])
-        
-        st.markdown("---")
-        
-        # About section
-        st.markdown("### About ROH-Ads")
-        st.write("""
-        ROH-Ads is an AI-powered marketing strategy assistant that helps businesses create effective marketing strategies.
-        """)
         
         return page
 
@@ -324,7 +313,7 @@ def business_profile_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    text_to_speech_placeholder(summary, gender="Female")
+                    text_to_speech_placeholder(summary, gender=st.session_state.voice_gender)
         else:
             st.error("Please fill in at least the Business Name and Industry fields.")
 
@@ -441,7 +430,7 @@ def strategy_generator_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    text_to_speech_placeholder(summary, gender="Male")
+                    text_to_speech_placeholder(summary, gender=st.session_state.voice_gender)
         else:
             st.error("Please select at least one marketing focus area.")
 
@@ -565,7 +554,7 @@ def campaign_planning_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    text_to_speech_placeholder(summary, gender="Female")
+                    text_to_speech_placeholder(summary, gender=st.session_state.voice_gender)
         else:
             st.error("Please fill in all required fields.")
 
