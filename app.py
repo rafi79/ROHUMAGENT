@@ -1,12 +1,8 @@
 import streamlit as st
 import requests
 import json
-import time
 import base64
-import os
-import pyttsx3
-import threading
-import tempfile
+import time
 from io import BytesIO
 
 # Set page configuration
@@ -43,67 +39,25 @@ if 'uploaded_files' not in st.session_state:
         'videos': [],
         'audio': []
     }
-if 'voice_gender' not in st.session_state:
-    st.session_state.voice_gender = "Female"
-if 'voice_speed' not in st.session_state:
-    st.session_state.voice_speed = "Normal"
 
-# Text-to-speech function using pyttsx3
-def text_to_speech(text, gender="Female", speed="Normal"):
-    """Convert text to speech using pyttsx3 and create an audio player"""
-    if not text:
-        return None
+# Cloud TTS function using an API endpoint
+def text_to_speech_placeholder(text, gender="Female"):
+    """
+    This is a placeholder for a TTS function.
+    In a real implementation, you would use a service like Google Cloud TTS API,
+    Amazon Polly, or another cloud TTS service.
+    """
+    st.info(f"TTS feature would speak: '{text[:100]}...' in a {gender} voice")
     
-    try:
-        # Create a temporary file for the audio
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-        temp_file_path = temp_file.name
-        temp_file.close()
-        
-        # Run TTS in a separate thread since it can block the main thread
-        def tts_thread():
-            engine = pyttsx3.init()
-            
-            # Configure voice based on gender
-            voices = engine.getProperty('voices')
-            
-            # Set voice based on gender (0 is usually male, 1 is usually female)
-            if gender == "Male":
-                engine.setProperty('voice', voices[0].id if len(voices) > 0 else voices[0].id)
-            else:  # Female
-                engine.setProperty('voice', voices[1].id if len(voices) > 1 else voices[0].id)
-            
-            # Configure speed (rate)
-            current_rate = engine.getProperty('rate')
-            if speed == "Slow":
-                engine.setProperty('rate', current_rate * 0.8)
-            elif speed == "Fast":
-                engine.setProperty('rate', current_rate * 1.2)
-            
-            # Save to file
-            engine.save_to_file(text, temp_file_path)
-            engine.runAndWait()
-        
-        # Start TTS thread
-        tts_thread = threading.Thread(target=tts_thread)
-        tts_thread.start()
-        tts_thread.join()  # Wait for TTS to complete
-        
-        # Read the audio file and convert to base64 for the audio player
-        with open(temp_file_path, 'rb') as audio_file:
-            audio_bytes = audio_file.read()
-        
-        # Clean up the temporary file
-        os.unlink(temp_file_path)
-        
-        # Convert to base64 for the audio player
-        audio_base64 = base64.b64encode(audio_bytes).decode()
-        audio_player = f'<audio autoplay controls><source src="data:audio/mp3;base64,{audio_base64}"></audio>'
-        
-        return audio_player
-    except Exception as e:
-        st.error(f"TTS Error: {str(e)}")
-        return None
+    # Create a simple audio notification instead
+    audio_html = """
+    <audio autoplay>
+        <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=" type="audio/wav">
+    </audio>
+    """
+    st.markdown(audio_html, unsafe_allow_html=True)
+    
+    return True
 
 def generate_with_gemini(prompt, image_data=None):
     """Generate content using Gemini model via REST API"""
@@ -186,17 +140,10 @@ def sidebar():
         st.subheader("🔊 Text-to-Speech")
         st.session_state.tts_active = st.toggle("Enable AI Voice", value=st.session_state.tts_active)
         
-        st.session_state.voice_speed = st.select_slider(
-            "Voice Speed",
-            options=["Slow", "Normal", "Fast"],
-            value=st.session_state.voice_speed,
-            disabled=not st.session_state.tts_active
-        )
-        
-        st.session_state.voice_gender = st.radio(
+        voice_gender = st.radio(
             "Voice Type",
             options=["Female", "Male"],
-            index=0 if st.session_state.voice_gender == "Female" else 1,
+            index=0,
             disabled=not st.session_state.tts_active
         )
         
@@ -210,13 +157,7 @@ def sidebar():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    audio_player = text_to_speech(
-                        summary, 
-                        gender=st.session_state.voice_gender, 
-                        speed=st.session_state.voice_speed
-                    )
-                    if audio_player:
-                        st.markdown(audio_player, unsafe_allow_html=True)
+                    text_to_speech_placeholder(summary, gender=voice_gender)
             else:
                 st.warning("No analysis available to speak yet.")
         
@@ -383,13 +324,7 @@ def business_profile_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    audio_player = text_to_speech(
-                        summary, 
-                        gender=st.session_state.voice_gender, 
-                        speed=st.session_state.voice_speed
-                    )
-                    if audio_player:
-                        st.markdown(audio_player, unsafe_allow_html=True)
+                    text_to_speech_placeholder(summary, gender="Female")
         else:
             st.error("Please fill in at least the Business Name and Industry fields.")
 
@@ -506,13 +441,7 @@ def strategy_generator_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    audio_player = text_to_speech(
-                        summary, 
-                        gender=st.session_state.voice_gender, 
-                        speed=st.session_state.voice_speed
-                    )
-                    if audio_player:
-                        st.markdown(audio_player, unsafe_allow_html=True)
+                    text_to_speech_placeholder(summary, gender="Male")
         else:
             st.error("Please select at least one marketing focus area.")
 
@@ -636,13 +565,7 @@ def campaign_planning_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    audio_player = text_to_speech(
-                        summary, 
-                        gender=st.session_state.voice_gender, 
-                        speed=st.session_state.voice_speed
-                    )
-                    if audio_player:
-                        st.markdown(audio_player, unsafe_allow_html=True)
+                    text_to_speech_placeholder(summary, gender="Female")
         else:
             st.error("Please fill in all required fields.")
 
