@@ -1,8 +1,7 @@
 import streamlit as st
-import os
+import requests
+import json
 import time
-from google import genai
-from google.genai import types
 
 # Set page configuration
 st.set_page_config(
@@ -12,14 +11,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Constants and configurations
+# Constants
 GEMINI_API_KEY = "AIzaSyBFjG6kQWfrpg0Q7tcvxxQHNDl3DVW8-gA"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 # Initialize session state
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
-if 'marketing_strategy' not in st.session_state:
-    st.session_state.marketing_strategy = None
 if 'business_data' not in st.session_state:
     st.session_state.business_data = {
         "business_name": "",
@@ -29,46 +25,47 @@ if 'business_data' not in st.session_state:
         "budget_range": "",
         "current_challenges": ""
     }
+if 'marketing_strategy' not in st.session_state:
+    st.session_state.marketing_strategy = None
 
-def generate_with_gemini(prompt, image_data=None):
-    """Generate content using Gemini model"""
+def generate_with_gemini(prompt):
+    """Generate content using Gemini model via REST API"""
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        client = genai.Client()
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY
+        }
         
-        # Prepare content parts
-        parts = []
+        data = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": prompt}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.7,
+                "topP": 0.95,
+                "topK": 40,
+                "maxOutputTokens": 4096
+            }
+        }
         
-        # Add text prompt
-        parts.append(types.Part.from_text(text=prompt))
-        
-        # Add image if provided
-        if image_data:
-            mime_type = f"image/{image_data.type.split('/')[-1]}"
-            image_bytes = image_data.getvalue()
-            parts.append(types.Part.from_data(data=image_bytes, mime_type=mime_type))
-        
-        contents = [types.Content(role="user", parts=parts)]
-        
-        # Configure generation parameters
-        generate_content_config = types.GenerateContentConfig(
-            temperature=0.7,
-            top_p=0.95,
-            top_k=40,
-            max_output_tokens=4096,
-            response_mime_type="text/plain",
+        response = requests.post(
+            GEMINI_API_URL,
+            headers=headers,
+            data=json.dumps(data)
         )
         
-        # Generate content
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=contents,
-            config=generate_content_config,
-        )
-        
-        return response.text
+        if response.status_code == 200:
+            result = response.json()
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            st.error(f"API Error: {response.status_code}")
+            return f"Error: {response.text}"
+            
     except Exception as e:
-        st.error(f"Error generating with Gemini: {e}")
+        st.error(f"Error: {str(e)}")
         return f"An error occurred: {str(e)}"
 
 # UI Components
@@ -81,14 +78,14 @@ def sidebar():
         
         # Navigation
         st.subheader("Navigation")
-        page = st.radio("Go to:", ["Business Profile", "Strategy Generator", "Campaign Planning", "Analytics"])
+        page = st.radio("Go to:", ["Business Profile", "Strategy Generator", "Campaign Planning"])
         
         st.markdown("---")
         
         # About section
         st.markdown("### About ROH-Ads")
         st.write("""
-        ROH-Ads is an AI-powered marketing strategy assistant that helps businesses create effective marketing strategies through intelligent analysis and recommendations.
+        ROH-Ads is an AI-powered marketing strategy assistant that helps businesses create effective marketing strategies.
         """)
         
         return page
@@ -144,46 +141,25 @@ def business_profile_page():
         height=100
     )
     
-    # Product/service images
-    st.subheader("Upload Product/Service Images")
-    st.write("Optional: Upload images of your product or service for better marketing analysis")
-    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-    
     if st.button("Save Profile"):
         if st.session_state.business_data["business_name"] and st.session_state.business_data["industry"]:
             st.success("Business profile saved successfully!")
-            # Analyze the profile with AI
-            if uploaded_file:
-                analysis_prompt = f"""
-                Analyze this business profile for marketing strategy opportunities:
-                Business Name: {st.session_state.business_data['business_name']}
-                Industry: {st.session_state.business_data['industry']}
-                Target Audience: {st.session_state.business_data['target_audience']}
-                Marketing Goals: {st.session_state.business_data['marketing_goals']}
-                Budget Range: {st.session_state.business_data['budget_range']}
-                Challenges: {st.session_state.business_data['current_challenges']}
-                
-                Also analyze the uploaded image of their product/service.
-                Provide 3-5 initial marketing strategy recommendations based on this data.
-                """
-                with st.spinner("Analyzing your business profile and image..."):
-                    analysis = generate_with_gemini(analysis_prompt, uploaded_file)
-                    st.session_state.profile_analysis = analysis
-            else:
-                analysis_prompt = f"""
-                Analyze this business profile for marketing strategy opportunities:
-                Business Name: {st.session_state.business_data['business_name']}
-                Industry: {st.session_state.business_data['industry']}
-                Target Audience: {st.session_state.business_data['target_audience']}
-                Marketing Goals: {st.session_state.business_data['marketing_goals']}
-                Budget Range: {st.session_state.business_data['budget_range']}
-                Challenges: {st.session_state.business_data['current_challenges']}
-                
-                Provide 3-5 initial marketing strategy recommendations based on this data.
-                """
-                with st.spinner("Analyzing your business profile..."):
-                    analysis = generate_with_gemini(analysis_prompt)
-                    st.session_state.profile_analysis = analysis
+            
+            analysis_prompt = f"""
+            Analyze this business profile for marketing strategy opportunities:
+            Business Name: {st.session_state.business_data['business_name']}
+            Industry: {st.session_state.business_data['industry']}
+            Target Audience: {st.session_state.business_data['target_audience']}
+            Marketing Goals: {st.session_state.business_data['marketing_goals']}
+            Budget Range: {st.session_state.business_data['budget_range']}
+            Challenges: {st.session_state.business_data['current_challenges']}
+            
+            Provide 3-5 initial marketing strategy recommendations based on this data.
+            """
+            
+            with st.spinner("Analyzing your business profile..."):
+                analysis = generate_with_gemini(analysis_prompt)
+                st.session_state.profile_analysis = analysis
             
             st.subheader("Initial Analysis")
             st.write(st.session_state.profile_analysis)
@@ -339,43 +315,6 @@ def campaign_planning_page():
         else:
             st.error("Please fill in all required fields.")
 
-def analytics_page():
-    st.header("📊 Marketing Analytics Assistant")
-    
-    # AI Marketing Assistant
-    st.subheader("Marketing AI Assistant")
-    st.write("Ask any marketing-related questions or get recommendations.")
-    
-    user_question = st.text_input("Your marketing question:")
-    
-    if st.button("Get AI Insights"):
-        if user_question:
-            # Prepare the context for the model
-            business_context = f"""
-            Business: {st.session_state.business_data.get('business_name', 'Unknown')}
-            Industry: {st.session_state.business_data.get('industry', 'Unknown')}
-            Target Audience: {st.session_state.business_data.get('target_audience', 'Unknown')}
-            """
-            
-            prompt = f"""
-            You are a marketing AI assistant. Answer the following marketing question with expert advice.
-            
-            Business Context:
-            {business_context}
-            
-            User Question: {user_question}
-            
-            Provide a helpful, insightful, and actionable response with specific recommendations when applicable.
-            """
-            
-            with st.spinner("Generating insights..."):
-                insights = generate_with_gemini(prompt)
-            
-            st.write("### Marketing Insights")
-            st.write(insights)
-        else:
-            st.warning("Please enter a marketing-related question.")
-
 # Main application
 def main():
     page = sidebar()
@@ -386,8 +325,6 @@ def main():
         strategy_generator_page()
     elif page == "Campaign Planning":
         campaign_planning_page()
-    elif page == "Analytics":
-        analytics_page()
 
 if __name__ == "__main__":
     main()
