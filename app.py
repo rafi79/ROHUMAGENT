@@ -4,9 +4,10 @@ import json
 import time
 import base64
 import os
-from gtts import gTTS
-from io import BytesIO
+import pyttsx3
+import threading
 import tempfile
+from io import BytesIO
 
 # Set page configuration
 st.set_page_config(
@@ -47,33 +48,53 @@ if 'voice_gender' not in st.session_state:
 if 'voice_speed' not in st.session_state:
     st.session_state.voice_speed = "Normal"
 
-# TTS function with improved male voice support
+# Text-to-speech function using pyttsx3
 def text_to_speech(text, gender="Female", speed="Normal"):
-    """Convert text to speech and create an audio player"""
+    """Convert text to speech using pyttsx3 and create an audio player"""
     if not text:
         return None
     
     try:
-        # Configure TTS based on speed
-        slow_option = False
-        if speed == "Slow":
-            slow_option = True
+        # Create a temporary file for the audio
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+        temp_file_path = temp_file.name
+        temp_file.close()
         
-        # Use different language codes for male/female approximation
-        # This is a workaround since gTTS doesn't directly support gender selection
-        lang_code = "en-us"  # Default female voice
-        if gender == "Male":
-            lang_code = "en-gb"  # British English tends to have a deeper voice
+        # Run TTS in a separate thread since it can block the main thread
+        def tts_thread():
+            engine = pyttsx3.init()
+            
+            # Configure voice based on gender
+            voices = engine.getProperty('voices')
+            
+            # Set voice based on gender (0 is usually male, 1 is usually female)
+            if gender == "Male":
+                engine.setProperty('voice', voices[0].id if len(voices) > 0 else voices[0].id)
+            else:  # Female
+                engine.setProperty('voice', voices[1].id if len(voices) > 1 else voices[0].id)
+            
+            # Configure speed (rate)
+            current_rate = engine.getProperty('rate')
+            if speed == "Slow":
+                engine.setProperty('rate', current_rate * 0.8)
+            elif speed == "Fast":
+                engine.setProperty('rate', current_rate * 1.2)
+            
+            # Save to file
+            engine.save_to_file(text, temp_file_path)
+            engine.runAndWait()
         
-        # Create the TTS object
-        tts = gTTS(text=text, lang=lang_code, slow=slow_option)
+        # Start TTS thread
+        tts_thread = threading.Thread(target=tts_thread)
+        tts_thread.start()
+        tts_thread.join()  # Wait for TTS to complete
         
-        # Save to a temporary file (better audio quality than BytesIO for some browsers)
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as fp:
-            tts.save(fp.name)
-            with open(fp.name, 'rb') as audio_file:
-                audio_bytes = audio_file.read()
-            os.unlink(fp.name)  # Remove the temp file
+        # Read the audio file and convert to base64 for the audio player
+        with open(temp_file_path, 'rb') as audio_file:
+            audio_bytes = audio_file.read()
+        
+        # Clean up the temporary file
+        os.unlink(temp_file_path)
         
         # Convert to base64 for the audio player
         audio_base64 = base64.b64encode(audio_bytes).decode()
