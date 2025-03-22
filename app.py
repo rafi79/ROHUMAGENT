@@ -1,8 +1,10 @@
 import streamlit as st
 import requests
 import json
+import time
 import base64
 import os
+from gtts import gTTS
 from io import BytesIO
 import tempfile
 
@@ -42,28 +44,45 @@ if 'uploaded_files' not in st.session_state:
     }
 if 'voice_gender' not in st.session_state:
     st.session_state.voice_gender = "Female"
+if 'voice_speed' not in st.session_state:
+    st.session_state.voice_speed = "Normal"
 
-# Simplified TTS function - uses a visual placeholder instead of actual speech
-def text_to_speech_placeholder(text, gender="Female"):
-    """Show a visual placeholder for TTS functionality"""
+# TTS function with improved male voice support
+def text_to_speech(text, gender="Female", speed="Normal"):
+    """Convert text to speech and create an audio player"""
     if not text:
         return None
     
-    # Create a notification sound (very short beep)
-    audio_html = """
-    <audio autoplay>
-        <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=" type="audio/wav">
-    </audio>
-    """
-    
-    # Display the text that would be spoken
-    tts_container = st.empty()
-    with tts_container.container():
-        st.markdown(f"### 🔊 AI Voice ({gender})")
-        st.info(f'"{text}"')
-        st.markdown(audio_html, unsafe_allow_html=True)
-    
-    return tts_container
+    try:
+        # Configure TTS based on speed
+        slow_option = False
+        if speed == "Slow":
+            slow_option = True
+        
+        # Use different language codes for male/female approximation
+        # This is a workaround since gTTS doesn't directly support gender selection
+        lang_code = "en-us"  # Default female voice
+        if gender == "Male":
+            lang_code = "en-gb"  # British English tends to have a deeper voice
+        
+        # Create the TTS object
+        tts = gTTS(text=text, lang=lang_code, slow=slow_option)
+        
+        # Save to a temporary file (better audio quality than BytesIO for some browsers)
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as fp:
+            tts.save(fp.name)
+            with open(fp.name, 'rb') as audio_file:
+                audio_bytes = audio_file.read()
+            os.unlink(fp.name)  # Remove the temp file
+        
+        # Convert to base64 for the audio player
+        audio_base64 = base64.b64encode(audio_bytes).decode()
+        audio_player = f'<audio autoplay controls><source src="data:audio/mp3;base64,{audio_base64}"></audio>'
+        
+        return audio_player
+    except Exception as e:
+        st.error(f"TTS Error: {str(e)}")
+        return None
 
 def generate_with_gemini(prompt, image_data=None):
     """Generate content using Gemini model via REST API"""
@@ -125,6 +144,15 @@ def save_uploaded_file(uploaded_file, file_type):
     
     return file_details
 
+def display_file_preview(file, file_type):
+    """Display a preview of the uploaded file"""
+    if file_type == "image":
+        st.image(file, caption=file.name, use_column_width=True)
+    elif file_type == "video":
+        st.video(file)
+    elif file_type == "audio":
+        st.audio(file)
+
 # UI Components
 def sidebar():
     with st.sidebar:
@@ -137,6 +165,13 @@ def sidebar():
         st.subheader("🔊 Text-to-Speech")
         st.session_state.tts_active = st.toggle("Enable AI Voice", value=st.session_state.tts_active)
         
+        st.session_state.voice_speed = st.select_slider(
+            "Voice Speed",
+            options=["Slow", "Normal", "Fast"],
+            value=st.session_state.voice_speed,
+            disabled=not st.session_state.tts_active
+        )
+        
         st.session_state.voice_gender = st.radio(
             "Voice Type",
             options=["Female", "Male"],
@@ -146,7 +181,7 @@ def sidebar():
         
         if st.session_state.tts_active and st.button("Speak Current Analysis"):
             if st.session_state.current_tts_text:
-                # Create a short summary for TTS
+                # Create a short summary for TTS to avoid long audio
                 summary_prompt = f"""
                 Create a 3-4 sentence summary of the key points from this content. Focus only on the most important takeaways:
                 
@@ -154,7 +189,13 @@ def sidebar():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    text_to_speech_placeholder(summary, gender=st.session_state.voice_gender)
+                    audio_player = text_to_speech(
+                        summary, 
+                        gender=st.session_state.voice_gender, 
+                        speed=st.session_state.voice_speed
+                    )
+                    if audio_player:
+                        st.markdown(audio_player, unsafe_allow_html=True)
             else:
                 st.warning("No analysis available to speak yet.")
         
@@ -189,6 +230,14 @@ def sidebar():
         # Navigation
         st.subheader("Navigation")
         page = st.radio("Go to:", ["Business Profile", "Strategy Generator", "Campaign Planning", "Media Gallery"])
+        
+        st.markdown("---")
+        
+        # About section
+        st.markdown("### About ROH-Ads")
+        st.write("""
+        ROH-Ads is an AI-powered marketing strategy assistant that helps businesses create effective marketing strategies.
+        """)
         
         return page
 
@@ -313,7 +362,13 @@ def business_profile_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    text_to_speech_placeholder(summary, gender=st.session_state.voice_gender)
+                    audio_player = text_to_speech(
+                        summary, 
+                        gender=st.session_state.voice_gender, 
+                        speed=st.session_state.voice_speed
+                    )
+                    if audio_player:
+                        st.markdown(audio_player, unsafe_allow_html=True)
         else:
             st.error("Please fill in at least the Business Name and Industry fields.")
 
@@ -430,7 +485,13 @@ def strategy_generator_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    text_to_speech_placeholder(summary, gender=st.session_state.voice_gender)
+                    audio_player = text_to_speech(
+                        summary, 
+                        gender=st.session_state.voice_gender, 
+                        speed=st.session_state.voice_speed
+                    )
+                    if audio_player:
+                        st.markdown(audio_player, unsafe_allow_html=True)
         else:
             st.error("Please select at least one marketing focus area.")
 
@@ -554,7 +615,13 @@ def campaign_planning_page():
                 """
                 with st.spinner("Generating audio summary..."):
                     summary = generate_with_gemini(summary_prompt)
-                    text_to_speech_placeholder(summary, gender=st.session_state.voice_gender)
+                    audio_player = text_to_speech(
+                        summary, 
+                        gender=st.session_state.voice_gender, 
+                        speed=st.session_state.voice_speed
+                    )
+                    if audio_player:
+                        st.markdown(audio_player, unsafe_allow_html=True)
         else:
             st.error("Please fill in all required fields.")
 
